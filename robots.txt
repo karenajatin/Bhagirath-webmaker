@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Disallow: /Bhagirath-webmaker/panel/
+Disallow: /Bhagirath-webmaker/cart/
+Disallow: /Bhagirath-webmaker/checkout/
+
+Sitemap: https://karenajatin.github.io/Bhagirath-webmaker/sitemap.xml

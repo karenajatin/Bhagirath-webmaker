@@ -3,23 +3,31 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.google.com/recaptcha/ https://www.gstatic.com/recaptcha/; style-src 'self'; img-src 'self' data: blob: https://www.google.com; font-src 'self'; connect-src 'self' https://*.googleapis.com https://www.google.com; frame-src https://www.google.com/recaptcha/ https://recaptcha.google.com/recaptcha/; worker-src 'self'; manifest-src 'self'; media-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob: https:; connect-src 'self' https://firestore.googleapis.com; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; manifest-src 'self'; worker-src 'self'">
 <meta name="referrer" content="strict-origin-when-cross-origin">
-<title>Bhagiratha — Shop billing, stock & khata</title>
-<meta name="description" content="Bhagiratha: GST billing with UPI QR, stock and expiry alerts, udhaar khata with WhatsApp reminders, purchases, expenses and reports for Indian shops. English, ગુજરાતી, हिन्दी.">
-<meta property="og:title" content="Bhagiratha — Shop billing, stock & khata">
-<meta property="og:description" content="GST billing, stock, khata, reports — for shopkeepers. Works offline.">
-<meta property="og:image" content="./icons/icon-512.png">
-<meta name="theme-color" content="#0f766e">
-<link rel="manifest" href="./manifest.webmanifest">
-<link rel="icon" href="./icons/logo.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
-<link rel="stylesheet" href="./app.css?v=41767050">
-<script src="./firebase-config.js?v=41767050"></script>
-<script type="module" src="./app.js?v=41767050"></script>
+<title>LiveShop – Online Shopping: Clothes, Shoes, Watches &amp; More</title>
+<meta name="description" content="Shop products online at LiveShop. Pay by UPI or cash, order on WhatsApp.">
+<link rel="canonical" href="https://karenajatin.github.io/Bhagirath-webmaker/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="LiveShop">
+<meta property="og:title" content="LiveShop – Online Shopping: Clothes, Shoes, Watches &amp; More">
+<meta property="og:description" content="Shop products online at LiveShop. Pay by UPI or cash, order on WhatsApp.">
+<meta property="og:url" content="https://karenajatin.github.io/Bhagirath-webmaker/">
+<meta property="og:image" content="https://karenajatin.github.io/Bhagirath-webmaker/icons/icon-512.png">
+<meta name="twitter:card" content="summary">
+<meta property="og:locale" content="en_IN">
+
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"OnlineStore","@id":"https://karenajatin.github.io/Bhagirath-webmaker/#store","name":"LiveShop","url":"https://karenajatin.github.io/Bhagirath-webmaker/","logo":"https://karenajatin.github.io/Bhagirath-webmaker/icons/icon-512.png","image":"https://karenajatin.github.io/Bhagirath-webmaker/icons/icon-512.png","sameAs":[],"currenciesAccepted":"INR","paymentAccepted":"UPI, Cash"}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"WebSite","name":"LiveShop","alternateName":"LiveShop","url":"https://karenajatin.github.io/Bhagirath-webmaker/","potentialAction":{"@type":"SearchAction","target":"https://karenajatin.github.io/Bhagirath-webmaker/?q={search_term_string}","query-input":"required name=search_term_string"}}</script>
+<meta name="theme-color" content="#4338ca">
+<link rel="icon" href="icons/logo.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="stylesheet" href="store.css?v=07920665">
+<script src="firebase-config.js?v=07920665"></script>
+<script type="module" src="store.js?v=07920665"></script>
 </head>
 <body>
-<div id="app"><div class="loading"><img src="./icons/logo.svg" alt="" width="64" height="64"><div class="spinner"></div></div></div>
-<noscript>Bhagiratha needs JavaScript.</noscript>
+<div id="app"><header class="top"><div class="top-row wrap"><a class="logo" href=""><span class="logo-mark">L</span><span class="logo-name">LiveShop</span></a><div class="top-actions"><a class="ic-btn" href="cart/" aria-label="Cart">🛒</a></div></div></header><main id="main" class="wrap"><section class="hero"><h1>LiveShop</h1></section><section class="empty soon"><div class="big">🛍️</div><h2>Products coming soon</h2></section></main><footer class="foot"><div class="wrap foot-grid"><div><b class="foot-name">LiveShop</b></div><div><b>Policies</b><ul><li><a href="about/">About &amp; contact</a></li><li><a href="policy/shipping/">Shipping &amp; Delivery Policy</a></li><li><a href="policy/returns/">Return &amp; Refund Policy</a></li><li><a href="policy/privacy/">Privacy Policy</a></li><li><a href="policy/terms/">Terms &amp; Conditions</a></li></ul></div></div><div class="wrap foot-bottom"><span>© LiveShop</span><a class="staff-link" rel="nofollow" href="panel/">Shopkeeper login</a></div></footer><script type="application/json" id="boot-data">{"sf":null,"items":[]}</script></div>
+<noscript><p>Turn on JavaScript to add items to your cart and order. You can still browse all products above.</p></noscript>
 </body>
 </html>

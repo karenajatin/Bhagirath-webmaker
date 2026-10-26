@@ -1,6 +1,6 @@
 {
- "name": "Bhagiratha — ભગીરથ",
- "short_name": "Bhagiratha",
+ "name": "Shop panel — Bhagiratha",
+ "short_name": "Shop panel",
  "description": "Shop billing, stock, khata and reports",
  "start_url": "./",
  "scope": "./",
@@ -11,23 +11,23 @@
  "lang": "en",
  "icons": [
   {
-   "src": "./icons/icon-192.png",
+   "src": "../icons/icon-192.png",
    "sizes": "192x192",
    "type": "image/png"
   },
   {
-   "src": "./icons/icon-512.png",
+   "src": "../icons/icon-512.png",
    "sizes": "512x512",
    "type": "image/png"
   },
   {
-   "src": "./icons/maskable-512.png",
+   "src": "../icons/maskable-512.png",
    "sizes": "512x512",
    "type": "image/png",
    "purpose": "maskable"
   },
   {
-   "src": "./icons/logo.svg",
+   "src": "../icons/logo.svg",
    "sizes": "any",
    "type": "image/svg+xml"
   }

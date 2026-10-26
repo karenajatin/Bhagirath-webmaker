@@ -1,0 +1,59 @@
+name: Build store pages
+
+# Regenerates the Google-friendly product pages, category pages and sitemap.xml
+# from the public catalog in Firestore, then commits them to this repository.
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "p/**"
+      - "c/**"
+      - "img/**"
+      - "about/**"
+      - "policy/**"
+      - "sitemap.xml"
+      - "robots.txt"
+      - "index.html"
+      - "404.html"
+
+permissions:
+  contents: write
+  pages: write
+
+concurrency:
+  group: build-store
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Generate pages from the public catalog
+        run: node tools/build-store.mjs
+      - name: Commit changes
+        run: |
+          git config user.name "store-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A p c img about policy sitemap.xml robots.txt index.html 404.html
+          if git diff --cached --quiet; then
+            echo "No changes"
+            echo "CHANGED=0" >> "$GITHUB_ENV"
+          else
+            git commit -m "Update store pages and sitemap"
+            git push
+            echo "CHANGED=1" >> "$GITHUB_ENV"
+          fi
+      - name: Publish to GitHub Pages
+        if: env.CHANGED == '1'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X POST "repos/${{ github.repository }}/pages/builds" || true
