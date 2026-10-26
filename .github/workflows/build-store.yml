@@ -42,7 +42,7 @@ jobs:
         run: |
           git config user.name "store-bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A p c img about policy sitemap.xml robots.txt index.html 404.html
+          git add -A
           if git diff --cached --quiet; then
             echo "No changes"
             echo "CHANGED=0" >> "$GITHUB_ENV"
