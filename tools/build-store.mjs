@@ -149,7 +149,6 @@ var shopSlug = (sf) => {
   const s = catSlug(sf && sf.name || DEFAULT_NAME);
   return /^c-/.test(s) ? "liveshop" : s;
 };
-var shopPath = (sf) => "shop/" + shopSlug(sf) + "/";
 function catCounts(sf, items) {
   return categoriesOf(sf, items).map((c) => ({ name: c, slug: catSlug(c), count: items.filter((p) => p.category === c).length }));
 }
@@ -172,6 +171,43 @@ var SOCIAL_ICON = {
   map: "M12 21s-7-6.2-7-12a7 7 0 0 1 14 0c0 5.8-7 12-7 12Zm0-9.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z"
 };
 var iconSvg = (k, size = 20) => `<svg viewBox="0 0 24 24" width="${size}" height="${size}" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="${SOCIAL_ICON[k] || ""}"/></svg>`;
+var productKey = (shop, p) => shop.home ? p.slug : shop.slug + "--" + p.slug;
+var shopUrlPath = (shop) => "shop/" + shop.slug + "/";
+function isDenied(e) {
+  return / 40[13]\b/.test(e && e.message || "");
+}
+async function loadShops(cfg, fetchFn = fetch) {
+  const homeId = await resolveShopId(cfg, fetchFn);
+  let pubs = [], marketOn = false;
+  try {
+    pubs = await listREST(cfg, "publicShops", fetchFn);
+    marketOn = true;
+  } catch (e) {
+    if (!isDenied(e)) throw e;
+  }
+  const list = [];
+  const homePub = pubs.find((x) => x.id === homeId);
+  if (homeId && !(homePub && homePub.active === false)) list.push({ id: homeId, home: true, slug: homePub && homePub.slug, name: homePub && homePub.name });
+  pubs.filter((x) => x.id !== homeId && x.active !== false && x.slug && x.name).sort((a, b) => String(a.slug).localeCompare(String(b.slug))).forEach((x) => list.push({ id: x.id, home: false, slug: x.slug, name: x.name }));
+  const shops = await Promise.all(list.map(async (s) => {
+    let sf = null, items = [];
+    try {
+      [sf, items] = await Promise.all([getDocREST(cfg, `shops/${s.id}/public/storefront`, fetchFn), listREST(cfg, `shops/${s.id}/catalog`, fetchFn)]);
+    } catch (e) {
+      if (s.home) throw e;
+      console.warn("shop", s.id, e.message);
+    }
+    return finishShop(s, sf, items);
+  }));
+  return { homeId, marketOn, shops };
+}
+function finishShop(s, sf, items) {
+  const name = sf && sf.name || s.name || DEFAULT_NAME;
+  const shop = Object.assign({}, s, { name, sf: Object.assign({ delivery: true, pickup: true, cod: true, upi: true }, sf || {}, { name }) });
+  shop.slug = s.slug || shopSlug(shop.sf);
+  shop.items = visibleProducts(items || []).map((p) => Object.assign({}, p, { shopId: s.id, key: productKey(shop, p) }));
+  return shop;
+}
 
 // store/generate.mjs
 var args = Object.fromEntries(process.argv.slice(2).map((a) => {
@@ -199,60 +235,79 @@ var write = (rel, content) => {
 var jsonLd = (o) => `<script type="application/ld+json">${JSON.stringify(o).replace(/</g, "\\u003c")}</script>`;
 var bootJson = (o) => `<script type="application/json" id="boot-data">${JSON.stringify(o).replace(/</g, "\\u003c")}</script>`;
 var abs = (rel) => SITE + rel;
+var dataImg = (u) => {
+  const m = typeof u === "string" && u.match(/^data:image\/(jpeg|png|webp);base64,(.*)$/);
+  return m ? { ext: m[1] === "jpeg" ? "jpg" : m[1], buf: Buffer.from(m[2], "base64") } : null;
+};
 async function main() {
-  let shopId = "", sf = null, items = [];
+  let shops = [], marketOn = false;
   try {
-    shopId = await resolveShopId(CFG);
-    if (shopId) {
-      [sf, items] = await Promise.all([getDocREST(CFG, `shops/${shopId}/public/storefront`), listREST(CFG, `shops/${shopId}/catalog`)]);
-    }
+    const r = await loadShops(CFG);
+    shops = r.shops;
+    marketOn = r.marketOn;
   } catch (e) {
-    if (/ 40[13]\b/.test(e.message)) {
+    if (isDenied(e)) {
       console.warn("::warning::The public catalog is not readable yet (" + e.message + '). Paste the new Firestore rules in the Firebase console. Building the "coming soon" pages.');
-      shopId = "";
-      sf = null;
-      items = [];
+      shops = [];
     } else {
       console.error("Could not read the public catalog:", e.message);
       if (!args["allow-empty"]) process.exit(1);
     }
   }
-  const S = Object.assign({ name: DEFAULT_NAME, delivery: true, pickup: true, cod: true, upi: true }, sf || {});
-  items = visibleProducts(items).sort((a, b) => a.name.localeCompare(b.name));
+  const home = shops.find((x) => x.home) || null;
+  const S = Object.assign({ name: DEFAULT_NAME, delivery: true, pickup: true, cod: true, upi: true }, home ? home.sf : {});
+  for (const shop of shops) shop.items.sort((a, b) => a.name.localeCompare(b.name));
+  const items = shops.flatMap((x) => x.items).sort((a, b) => a.name.localeCompare(b.name));
+  const shopById = new Map(shops.map((x) => [x.id, x]));
+  const shopOf = (p) => shopById.get(p.shopId);
   const cats = categoriesOf(S, items);
-  console.log(`shop=${shopId || "(none yet)"} name="${S.name}" products=${items.length} categories=${cats.length}`);
-  for (const d of ["p", "c", "img", "about", "policy", "shop"]) rmSync(join(ROOT, d), { recursive: true, force: true });
+  console.log(`marketplace=${marketOn ? "on" : "off (rules v3 not published)"} shops=${shops.length} [${shops.map((x) => x.slug + ":" + x.items.length).join(", ")}] products=${items.length} categories=${cats.length}`);
+  for (const d of ["p", "c", "img", "about", "policy", "shop", "shops"]) rmSync(join(ROOT, d), { recursive: true, force: true });
+  for (const f of readdirSync(ROOT)) if (/^sitemap-shop-.+\.xml$/.test(f)) rmSync(join(ROOT, f), { force: true });
   const images = /* @__PURE__ */ new Map();
   const withImgs = items.filter((p) => p.imageCount > 0);
   for (let i = 0; i < withImgs.length; i += 8) {
     await Promise.all(withImgs.slice(i, i + 8).map(async (p) => {
       try {
-        const d = await getDocREST(CFG, `shops/${shopId}/catalogImages/${p.id}`);
-        const list = (d && d.images || []).filter((x) => typeof x === "string" && /^data:image\/(jpeg|png|webp);base64,/.test(x)).slice(0, 5);
-        images.set(p.id, list.map((u, n) => {
-          const m = u.match(/^data:image\/(\w+);base64,(.*)$/);
-          const ext = m[1] === "jpeg" ? "jpg" : m[1];
-          const rel = `img/${p.slug}-${n + 1}.${ext}`;
-          write(rel, Buffer.from(m[2], "base64"));
+        const d = await getDocREST(CFG, `shops/${p.shopId}/catalogImages/${p.id}`);
+        const list = (d && d.images || []).map(dataImg).filter(Boolean).slice(0, 5);
+        images.set(p.id, list.map((x, n) => {
+          const rel = `img/${p.key}-${n + 1}.${x.ext}`;
+          write(rel, x.buf);
           return rel;
         }));
       } catch (e) {
-        console.warn("images", p.slug, e.message);
+        console.warn("images", p.key, e.message);
       }
     }));
   }
-  if (S.logo && /^data:image\/(jpeg|png|webp);base64,/.test(S.logo)) {
-    const m = S.logo.match(/^data:image\/(\w+);base64,(.*)$/);
-    write("img/logo." + (m[1] === "jpeg" ? "jpg" : m[1]), Buffer.from(m[2], "base64"));
-    S._logoRel = "img/logo." + (m[1] === "jpeg" ? "jpg" : m[1]);
+  for (const shop of shops) {
+    const lg = dataImg(shop.sf.logo);
+    if (lg) {
+      shop._logoRel = shop.home ? `img/logo.${lg.ext}` : `img/logo-${shop.slug}.${lg.ext}`;
+      write(shop._logoRel, lg.buf);
+    }
+    const cv = dataImg(shop.sf.cover);
+    if (cv) {
+      shop._coverRel = `img/cover-${shop.slug}.${cv.ext}`;
+      write(shop._coverRel, cv.buf);
+    }
   }
+  if (home && home._logoRel) S._logoRel = home._logoRel;
   const firstImg = (p) => (images.get(p.id) || [])[0];
   const lean = (p) => {
     const o = Object.assign({}, p);
     delete o.thumb;
     return o;
   };
-  const leanSf = sf ? Object.assign({}, sf, { logo: void 0, policyShipping: void 0, policyReturns: void 0, policyPrivacy: void 0, policyTerms: void 0 }) : null;
+  const leanShop = (shop, list) => ({
+    id: shop.id,
+    home: shop.home,
+    slug: shop.slug,
+    name: shop.name,
+    sf: Object.assign({}, shop.sf, { logo: void 0, cover: void 0, policyShipping: void 0, policyReturns: void 0, policyPrivacy: void 0, policyTerms: void 0 }),
+    items: (list || shop.items).map(lean)
+  });
   const org = {
     "@context": "https://schema.org",
     "@type": "OnlineStore",
@@ -291,72 +346,81 @@ async function main() {
     `<meta property="og:locale" content="en_IN">`,
     extra
   ].join("\n");
-  const SHOP = shopPath(S);
-  const SOC = socialLinks(S);
-  const WA = waNumber(S.whatsapp || S.phone);
-  const SELLS = sellsLine(S, items);
-  const logoHtml = (pre, cls) => S._logoRel ? `<img class="${cls}" src="${pre}${S._logoRel}" alt="${esc(S.name)} logo" width="64" height="64">` : `<span class="${cls} mono">${esc((S.name || "L")[0].toUpperCase())}</span>`;
-  const socialRow = () => SOC.length ? `<div class="soc-row">${SOC.map((s) => `<a class="soc soc-${s.k}" href="${esc(s.url)}" target="_blank" rel="noopener me" aria-label="${esc(s.label)}" title="${esc(s.label)}">${iconSvg(s.k)}</a>`).join("")}</div>` : "";
-  const shopCardHtml = (pre) => `<section class="shopcard" aria-label="Sold by"><div class="shopcard-head">${logoHtml(pre, "shop-logo")}<div class="shopcard-txt"><small class="muted">Sold by</small><a class="shopcard-name" href="${pre}${SHOP}">${esc(S.name)}</a>${S.tagline ? `<p class="shopcard-tag">${esc(S.tagline)}</p>` : ""}${SELLS ? `<p class="shopcard-sells">Sells: ${esc(SELLS)}</p>` : ""}</div></div><div class="shopcard-btns"><a class="btn primary sm" href="${pre}${SHOP}">View shop profile</a>${WA ? `<a class="btn wa-o sm" href="https://wa.me/${WA}" target="_blank" rel="noopener">${iconSvg("whatsapp", 18)} WhatsApp</a>` : ""}${S.phone ? `<a class="btn ghost sm" href="tel:${esc(S.phone)}">${iconSvg("phone", 18)} Call</a>` : ""}</div>${socialRow()}</section>`;
-  const topbar = (pre) => `<header class="top"><div class="top-row wrap"><a class="logo" href="${pre}"><span class="logo-mark">${esc((S.name || "L")[0])}</span><span class="logo-name">${esc(S.name)}</span></a><div class="top-actions"><a class="ic-btn" href="${pre}${SHOP}" aria-label="Shop profile" title="Shop profile">\u{1F3EA}</a><a class="ic-btn" href="${pre}cart/" aria-label="Cart">\u{1F6D2}</a></div></div></header>`;
-  const foot = (pre) => `<footer class="foot"><div class="wrap foot-grid"><div><b class="foot-name">${esc(S.name)}</b>${S.tagline ? `<p>${esc(S.tagline)}</p>` : ""}${S.address ? `<p>\u{1F4CD} ${esc(S.address)}</p>` : ""}${S.phone ? `<p>\u{1F4DE} <a href="tel:${esc(S.phone)}">${esc(S.phone)}</a></p>` : ""}${S.email ? `<p>\u2709\uFE0F <a href="mailto:${esc(S.email)}">${esc(S.email)}</a></p>` : ""}</div>` + (cats.length ? `<div><b>Shop by category</b><ul>${cats.map((c) => `<li><a href="${pre}c/${catSlug(c)}/">${esc(c)}</a></li>`).join("")}</ul></div>` : "") + `<div><b>Policies</b><ul><li><a href="${pre}${SHOP}">Shop profile</a></li><li><a href="${pre}about/">About &amp; contact</a></li>${Object.keys(POLICIES).map((k) => `<li><a href="${pre}policy/${k}/">${esc(POLICIES[k].title)}</a></li>`).join("")}</ul></div></div><div class="wrap foot-bottom"><span>\xA9 ${esc(S.name)}</span><a class="staff-link" rel="nofollow" href="${pre}panel/">Shopkeeper login</a></div></footer>`;
+  const logoHtml = (shop, pre, cls) => shop && shop._logoRel ? `<img class="${cls}" src="${pre}${shop._logoRel}" alt="${esc(shop.name)} logo" width="64" height="64">` : `<span class="${cls} mono">${esc((shop && shop.name || "L")[0].toUpperCase())}</span>`;
+  const socialRow = (sf) => {
+    const SOC = socialLinks(sf);
+    return SOC.length ? `<div class="soc-row">${SOC.map((s) => `<a class="soc soc-${s.k}" href="${esc(s.url)}" target="_blank" rel="noopener me" aria-label="${esc(s.label)}" title="${esc(s.label)}">${iconSvg(s.k)}</a>`).join("")}</div>` : "";
+  };
+  const shopCardHtml = (shop, pre) => {
+    const sf = shop.sf;
+    const SP = shopUrlPath(shop);
+    const WA = waNumber(sf.whatsapp || sf.phone);
+    const SELLS = sellsLine(sf, shop.items);
+    return `<section class="shopcard" aria-label="Sold by"><div class="shopcard-head">${logoHtml(shop, pre, "shop-logo")}<div class="shopcard-txt"><small class="muted">Sold by</small><a class="shopcard-name" href="${pre}${SP}">${esc(shop.name)}</a>${sf.tagline ? `<p class="shopcard-tag">${esc(sf.tagline)}</p>` : ""}${SELLS ? `<p class="shopcard-sells">Sells: ${esc(SELLS)}</p>` : ""}</div></div><div class="shopcard-btns"><a class="btn primary sm" href="${pre}${SP}">View shop profile</a>${WA ? `<a class="btn wa-o sm" href="https://wa.me/${WA}" target="_blank" rel="noopener">${iconSvg("whatsapp", 18)} WhatsApp</a>` : ""}${sf.phone ? `<a class="btn ghost sm" href="tel:${esc(sf.phone)}">${iconSvg("phone", 18)} Call</a>` : ""}</div>${socialRow(sf)}</section>`;
+  };
+  const topbar = (pre) => `<header class="top"><div class="top-row wrap"><a class="logo" href="${pre}"><span class="logo-mark">${esc((S.name || "L")[0])}</span><span class="logo-name">${esc(S.name)}</span></a><div class="top-actions"><a class="ic-btn" href="${pre}shops/" aria-label="All shops" title="All shops">\u{1F3EA}</a><a class="ic-btn" href="${pre}cart/" aria-label="Cart">\u{1F6D2}</a></div></div></header>`;
+  const foot = (pre) => `<footer class="foot"><div class="wrap foot-grid"><div><b class="foot-name">${esc(S.name)}</b>${S.tagline ? `<p>${esc(S.tagline)}</p>` : ""}${S.address ? `<p>\u{1F4CD} ${esc(S.address)}</p>` : ""}${S.phone ? `<p>\u{1F4DE} <a href="tel:${esc(S.phone)}">${esc(S.phone)}</a></p>` : ""}${S.email ? `<p>\u2709\uFE0F <a href="mailto:${esc(S.email)}">${esc(S.email)}</a></p>` : ""}</div>` + (cats.length ? `<div><b>Shop by category</b><ul>${cats.map((c) => `<li><a href="${pre}c/${catSlug(c)}/">${esc(c)}</a></li>`).join("")}</ul></div>` : "") + `<div><b>Policies</b><ul><li><a href="${pre}shops/">All shops</a></li><li><a href="${pre}about/">About &amp; contact</a></li>${Object.keys(POLICIES).map((k) => `<li><a href="${pre}policy/${k}/">${esc(POLICIES[k].title)}</a></li>`).join("")}</ul></div></div><div class="wrap foot-bottom"><span>\xA9 ${esc(S.name)}</span><a class="staff-link" rel="nofollow" href="${pre}panel/">Shopkeeper login</a></div></footer>`;
   const cardHtml = (p, pre) => {
     const img = firstImg(p);
     const off = pctOff(p.price, p.mrp);
-    return `<article class="pcard${p.inStock ? "" : " oos"}"><a class="pcard-img" href="${pre}p/${p.slug}/">${img ? `<img class="pimg" src="${pre}${img}" alt="${esc(p.name)}" loading="lazy" width="400" height="400">` : `<div class="pimg ph"><span>\u{1F6CD}\uFE0F</span></div>`}${off ? `<span class="tag-off">${off}% off</span>` : ""}${p.inStock ? "" : '<span class="tag-oos">Out of stock</span>'}</a><div class="pcard-body"><a class="pname" href="${pre}p/${p.slug}/">${esc(p.name)}</a><div class="price"><b>${rupees(p.price)}</b>${off ? `<s>${rupees(p.mrp)}</s><span class="off">${off}% off</span>` : ""}</div></div></article>`;
+    const shop = shopOf(p);
+    return `<article class="pcard${p.inStock ? "" : " oos"}"><a class="pcard-img" href="${pre}p/${p.key}/">${img ? `<img class="pimg" src="${pre}${img}" alt="${esc(p.name)}" loading="lazy" width="400" height="400">` : `<div class="pimg ph"><span>\u{1F6CD}\uFE0F</span></div>`}${off ? `<span class="tag-off">${off}% off</span>` : ""}${p.inStock ? "" : '<span class="tag-oos">Out of stock</span>'}</a><div class="pcard-body"><a class="pname" href="${pre}p/${p.key}/">${esc(p.name)}</a><div class="price"><b>${rupees(p.price)}</b>${off ? `<s>${rupees(p.mrp)}</s><span class="off">${off}% off</span>` : ""}</div>` + (shop ? `<small class="pseller">Sold by <a class="pseller-a" href="${pre}${shopUrlPath(shop)}">${esc(shop.name)}</a></small>` : "") + `</div></article>`;
   };
   const page = (pre, h, body, boot) => SHELL.replaceAll("__PRE__", pre).replace("<!--HEAD-->", h).replace("<!--BODY-->", topbar(pre) + `<main id="main" class="wrap">${body}</main>` + foot(pre) + (boot ? bootJson(boot) : ""));
   const verify = CFG.GOOGLE_SITE_VERIFICATION ? `<meta name="google-site-verification" content="${esc(CFG.GOOGLE_SITE_VERIFICATION)}">` : "";
   const urls = [];
   const lastmodOf = (p) => (p._updated || "").slice(0, 10);
   const newest = items.map(lastmodOf).sort().pop() || "";
+  const sfMod = (shop) => (shop && shop.sf && shop.sf._updated || "").slice(0, 10);
   const homeTitle = homeTitleOf(S);
-  const homeDesc = (S.tagline ? S.tagline + ". " : "") + `Shop ${cats.length ? cats.join(", ") : "products"} online at ${S.name}. Pay by UPI or cash, order on WhatsApp.`;
+  const homeDesc = (S.tagline ? S.tagline + ". " : "") + `Shop ${cats.length ? cats.join(", ") : "products"} online at ${S.name}${shops.length > 1 ? " from " + shops.length + " shops" : ""}. Pay by UPI or cash, order on WhatsApp.`;
   const homeBody = `<section class="hero"><h1>${esc(S.name)}</h1>${S.tagline ? `<p class="tagline">${esc(S.tagline)}</p>` : ""}</section>` + (cats.length ? `<div class="chips-wrap"><div class="chips">${cats.map((c) => `<a class="chip" href="c/${catSlug(c)}/">${esc(c)}</a>`).join("")}</div></div>` : "") + (items.length ? `<section class="grid">${items.map((p) => cardHtml(p, "")).join("")}</section>` : `<section class="empty soon"><div class="big">\u{1F6CD}\uFE0F</div><h2>Products coming soon</h2></section>`);
-  write("index.html", page("", head({ title: homeTitle, desc: homeDesc.slice(0, 300), path: "", image: S._logoRel, extra: verify + "\n" + jsonLd(org) + "\n" + jsonLd(website) }), homeBody, { sf: leanSf, items: items.map(lean) }));
+  write("index.html", page("", head({ title: homeTitle, desc: homeDesc.slice(0, 300), path: "", image: S._logoRel, extra: verify + "\n" + jsonLd(org) + "\n" + jsonLd(website) }), homeBody, { shops: shops.map((x) => leanShop(x)) }));
   urls.push({ loc: SITE, lastmod: newest, priority: "1.0" });
   for (const p of items) {
     const pre = "../../";
     const imgs = images.get(p.id) || [];
     const off = pctOff(p.price, p.mrp);
-    const title = `${p.name} \u2013 ${rupees(p.price)} \u2013 ${S.name}`;
-    const desc = (p.description ? p.description.replace(/\s+/g, " ").slice(0, 150) + " " : "") + `Buy ${p.name} at ${rupees(p.price)}${off ? ` (${off}% off MRP ${rupees(p.mrp)})` : ""} from ${S.name}. ${p.inStock ? "In stock." : "Currently out of stock."}`;
+    const shop = shopOf(p);
+    const SP = shopUrlPath(shop);
+    const title = `${p.name} \u2013 ${rupees(p.price)} \u2013 ${shop.name}`;
+    const desc = (p.description ? p.description.replace(/\s+/g, " ").slice(0, 150) + " " : "") + `Buy ${p.name} at ${rupees(p.price)}${off ? ` (${off}% off MRP ${rupees(p.mrp)})` : ""} from ${shop.name}${shop.home ? "" : " on " + S.name}. ${p.inStock ? "In stock." : "Currently out of stock."}`;
     const ld = {
       "@context": "https://schema.org",
       "@type": "Product",
       name: p.name,
       sku: p.id,
-      url: abs(`p/${p.slug}/`),
+      url: abs(`p/${p.key}/`),
       image: imgs.length ? imgs.map(abs) : void 0,
-      description: p.description || `${p.name} from ${S.name}`,
+      description: p.description || `${p.name} from ${shop.name}`,
       category: p.category || void 0,
-      brand: { "@type": "Brand", name: S.name },
+      brand: { "@type": "Brand", name: shop.name },
       offers: {
         "@type": "Offer",
-        url: abs(`p/${p.slug}/`),
+        url: abs(`p/${p.key}/`),
         priceCurrency: "INR",
         price: rupeesPlain(p.price),
         availability: p.inStock ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
         itemCondition: "https://schema.org/NewCondition",
-        seller: { "@type": "OnlineStore", name: S.name, url: abs(SHOP) }
+        seller: { "@type": "OnlineStore", name: shop.name, url: abs(SP) }
       }
     };
     const crumbs = { "@context": "https://schema.org", "@type": "BreadcrumbList", itemListElement: [
       { "@type": "ListItem", position: 1, name: S.name, item: SITE },
       ...p.category ? [{ "@type": "ListItem", position: 2, name: p.category, item: abs(`c/${catSlug(p.category)}/`) }] : [],
-      { "@type": "ListItem", position: p.category ? 3 : 2, name: p.name, item: abs(`p/${p.slug}/`) }
+      { "@type": "ListItem", position: p.category ? 3 : 2, name: p.name, item: abs(`p/${p.key}/`) }
     ] };
-    const body = `<nav class="crumbs"><a href="${pre}">Home</a>${p.category ? ` \u203A <a href="${pre}c/${catSlug(p.category)}/">${esc(p.category)}</a>` : ""} \u203A <span>${esc(p.name)}</span></nav><div class="pdp"><div class="pdp-grid"><div class="pdp-media"><div class="gallery">${imgs.length ? imgs.map((im, i) => `<div class="slide"><img class="gimg" src="${pre}${im}" alt="${esc(p.name)} ${i + 1}" width="800" height="800"></div>`).join("") : '<div class="slide"><div class="gimg ph"><span>\u{1F6CD}\uFE0F</span></div></div>'}</div></div><div class="pdp-info"><h1 class="pdp-name">${esc(p.name)}</h1><div class="price big"><b>${rupees(p.price)}</b>${off ? `<s>${rupees(p.mrp)}</s><span class="off">${off}% off</span>` : ""}</div><div class="stock ${p.inStock ? "ok" : "no"}">\u25CF ${p.inStock ? "In stock" : "Out of stock"}</div>` + (p.description ? `<section class="desc"><h2>Description</h2>${p.description.split(/\n+/).map((x) => `<p>${esc(x)}</p>`).join("")}</section>` : "") + `<table class="specs"><tbody>${p.category ? `<tr><th>Category</th><td>${esc(p.category)}</td></tr>` : ""}${p.unit ? `<tr><th>Unit</th><td>${esc(p.unit)}</td></tr>` : ""}</tbody></table>${shopCardHtml(pre)}</div></div></div>`;
-    write(`p/${p.slug}/index.html`, page(pre, head({
+    const body = `<nav class="crumbs"><a href="${pre}">Home</a>${p.category ? ` \u203A <a href="${pre}c/${catSlug(p.category)}/">${esc(p.category)}</a>` : ""} \u203A <span>${esc(p.name)}</span></nav><div class="pdp"><div class="pdp-grid"><div class="pdp-media"><div class="gallery">${imgs.length ? imgs.map((im, i) => `<div class="slide"><img class="gimg" src="${pre}${im}" alt="${esc(p.name)} ${i + 1}" width="800" height="800"></div>`).join("") : '<div class="slide"><div class="gimg ph"><span>\u{1F6CD}\uFE0F</span></div></div>'}</div></div><div class="pdp-info"><h1 class="pdp-name">${esc(p.name)}</h1><div class="price big"><b>${rupees(p.price)}</b>${off ? `<s>${rupees(p.mrp)}</s><span class="off">${off}% off</span>` : ""}</div><div class="stock ${p.inStock ? "ok" : "no"}">\u25CF ${p.inStock ? "In stock" : "Out of stock"}</div>` + (p.description ? `<section class="desc"><h2>Description</h2>${p.description.split(/\n+/).map((x) => `<p>${esc(x)}</p>`).join("")}</section>` : "") + `<table class="specs"><tbody>${p.category ? `<tr><th>Category</th><td>${esc(p.category)}</td></tr>` : ""}${p.unit ? `<tr><th>Unit</th><td>${esc(p.unit)}</td></tr>` : ""}<tr><th>Sold by</th><td><a href="${pre}${SP}">${esc(shop.name)}</a></td></tr></tbody></table>${shopCardHtml(shop, pre)}</div></div></div>`;
+    write(`p/${p.key}/index.html`, page(pre, head({
       title,
       desc: desc.slice(0, 300),
-      path: `p/${p.slug}/`,
+      path: `p/${p.key}/`,
       image: imgs[0],
       type: "product",
       extra: `<meta property="product:price:amount" content="${rupeesPlain(p.price)}"><meta property="product:price:currency" content="INR">
 ` + jsonLd(ld) + "\n" + jsonLd(crumbs)
-    }), body, { sf: leanSf, items: [lean(p)] }));
-    urls.push({ group: "products", loc: abs(`p/${p.slug}/`), lastmod: lastmodOf(p), priority: "0.8", images: imgs.map((im) => ({ loc: abs(im), title: p.name })) });
+    }), body, { shops: [leanShop(shop, [p])] }));
+    urls.push({ group: "products", shop: shop.slug, loc: abs(`p/${p.key}/`), lastmod: lastmodOf(p), priority: "0.8", images: imgs.map((im) => ({ loc: abs(im), title: p.name })) });
   }
   for (const c of cats) {
     const pre = "../../";
@@ -367,7 +431,7 @@ async function main() {
       "@type": "CollectionPage",
       name: `${c} \u2013 ${S.name}`,
       url: abs(`c/${slug}/`),
-      mainEntity: { "@type": "ItemList", itemListElement: list.slice(0, 100).map((p, i) => ({ "@type": "ListItem", position: i + 1, url: abs(`p/${p.slug}/`), name: p.name })) }
+      mainEntity: { "@type": "ItemList", itemListElement: list.slice(0, 100).map((p, i) => ({ "@type": "ListItem", position: i + 1, url: abs(`p/${p.key}/`), name: p.name })) }
     };
     const body = `<nav class="crumbs"><a href="${pre}">Home</a> \u203A <span>${esc(c)}</span></nav><h1 class="page-title">${esc(c)}</h1><section class="grid">${list.map((p) => cardHtml(p, pre)).join("")}</section>`;
     write(`c/${slug}/index.html`, page(pre, head({ title: `${c} \u2013 Buy Online \u2013 ${S.name}`, desc: `Shop ${c} online at ${S.name}: ${list.slice(0, 6).map((p) => p.name).join(", ")}. Best prices, UPI or cash payment.`.slice(0, 300), path: `c/${slug}/`, image: list.map(firstImg).find(Boolean), extra: jsonLd(ld) }), body, null));
@@ -377,9 +441,9 @@ async function main() {
     const pre = "../";
     const map = safeUrl(S.mapUrl);
     const wa = waNumber(S.whatsapp || S.phone);
-    const body = `<h1 class="page-title">About ${esc(S.name)}</h1><p><a class="btn ghost sm" href="${pre}${SHOP}">\u{1F3EA} View our shop profile</a></p><section class="box">${S.tagline ? `<p>${esc(S.tagline)}</p>` : ""}${(S.about || "").split(/\n+/).filter(Boolean).map((x) => `<p>${esc(x)}</p>`).join("")}</section><section class="box"><h2>Contact us</h2>${S.address ? `<p>\u{1F4CD} ${esc(S.address)}${S.city ? ", " + esc(S.city) : ""}</p>` : ""}${S.hours ? `<p>\u{1F558} ${esc(S.hours)}</p>` : ""}${S.phone ? `<p>\u{1F4DE} <a href="tel:${esc(S.phone)}">${esc(S.phone)}</a></p>` : ""}${wa ? `<p>\u{1F4AC} <a href="https://wa.me/${wa}">WhatsApp</a></p>` : ""}${S.email ? `<p>\u2709\uFE0F <a href="mailto:${esc(S.email)}">${esc(S.email)}</a></p>` : ""}${map ? `<p>\u{1F5FA} <a href="${esc(map)}">Get directions</a></p>` : ""}</section>`;
+    const body = `<h1 class="page-title">About ${esc(S.name)}</h1><p><a class="btn ghost sm" href="${pre}shops/">\u{1F3EA} All shops</a></p><section class="box">${S.tagline ? `<p>${esc(S.tagline)}</p>` : ""}${(S.about || "").split(/\n+/).filter(Boolean).map((x) => `<p>${esc(x)}</p>`).join("")}</section><section class="box"><h2>Contact us</h2>${S.address ? `<p>\u{1F4CD} ${esc(S.address)}${S.city ? ", " + esc(S.city) : ""}</p>` : ""}${S.hours ? `<p>\u{1F558} ${esc(S.hours)}</p>` : ""}${S.phone ? `<p>\u{1F4DE} <a href="tel:${esc(S.phone)}">${esc(S.phone)}</a></p>` : ""}${wa ? `<p>\u{1F4AC} <a href="https://wa.me/${wa}">WhatsApp</a></p>` : ""}${S.email ? `<p>\u2709\uFE0F <a href="mailto:${esc(S.email)}">${esc(S.email)}</a></p>` : ""}${map ? `<p>\u{1F5FA} <a href="${esc(map)}">Get directions</a></p>` : ""}</section>`;
     write("about/index.html", page(pre, head({ title: `About & Contact \u2013 ${S.name}`, desc: `Contact ${S.name}${S.address ? ", " + S.address : ""}${S.phone ? ", phone " + S.phone : ""}.`.slice(0, 300), path: "about/", extra: jsonLd(org) }), body, null));
-    urls.push({ loc: abs("about/"), lastmod: (sf && sf._updated || "").slice(0, 10), priority: "0.5" });
+    urls.push({ loc: abs("about/"), lastmod: sfMod(home), priority: "0.5" });
   }
   for (const k of Object.keys(POLICIES)) {
     const pre = "../../";
@@ -390,50 +454,74 @@ async function main() {
       `<article class="policy box"><h1>${esc(POLICIES[k].title)}</h1>${txt.split(/\n+/).map((x) => `<p>${esc(x)}</p>`).join("")}</article>`,
       null
     ));
-    urls.push({ loc: abs(`policy/${k}/`), lastmod: (sf && sf._updated || "").slice(0, 10), priority: "0.3" });
+    urls.push({ loc: abs(`policy/${k}/`), lastmod: sfMod(home), priority: "0.3" });
   }
-  {
+  for (const shop of shops) {
+    const sf = shop.sf;
     const pre = "../../";
-    const map = safeUrl(S.mapUrl);
-    const cc = catCounts(S, items);
-    const url = abs(SHOP);
-    const logoAbs = S._logoRel ? abs(S._logoRel) : abs("icons/icon-512.png");
+    const SP = shopUrlPath(shop);
+    const list = shop.items;
+    const WA = waNumber(sf.whatsapp || sf.phone);
+    const map = safeUrl(sf.mapUrl);
+    const cc = catCounts(sf, list);
+    const url = abs(SP);
+    const logoAbs = shop._logoRel ? abs(shop._logoRel) : abs("icons/icon-512.png");
     const catWords = cc.slice(0, 4).map((x) => x.name).join(", ");
-    const title = `${S.name} \u2013 Shop Profile${catWords ? " | " + catWords : ""}`;
-    const desc = `${S.name}${S.tagline ? " \u2013 " + S.tagline : ""}. ${cc.length ? "Sells " + cc.map((x) => x.name).join(", ") + ". " : ""}${items.length} products online. Order on WhatsApp, pay by UPI or cash.`;
-    const sameAs = SOC.map((s) => s.url);
+    const title = `${shop.name} \u2013 Shop Profile${catWords ? " | " + catWords : ""}${shop.home ? "" : " | " + S.name}`;
+    const desc = `${shop.name}${sf.tagline ? " \u2013 " + sf.tagline : ""}. ${cc.length ? "Sells " + cc.map((x) => x.name).join(", ") + ". " : ""}${list.length} products online${shop.home ? "" : " on " + S.name}. Order on WhatsApp, pay by UPI or cash.`;
+    const sameAs = socialLinks(sf).map((s) => s.url);
     const ld = {
       "@context": "https://schema.org",
       "@type": "OnlineStore",
       "@id": url + "#shop",
-      name: S.name,
+      name: shop.name,
       url,
       logo: logoAbs,
-      image: logoAbs,
-      description: (S.about || S.tagline || `${S.name} online shop`).slice(0, 500),
+      image: shop._coverRel ? [logoAbs, abs(shop._coverRel)] : logoAbs,
+      description: (sf.about || sf.tagline || `${shop.name} online shop`).slice(0, 500),
       sameAs: sameAs.length ? sameAs : void 0,
-      telephone: S.phone || void 0,
-      email: S.email || void 0,
-      address: S.address ? { "@type": "PostalAddress", streetAddress: S.address, addressLocality: S.city || void 0, addressCountry: "IN" } : void 0,
-      contactPoint: S.phone || S.whatsapp || S.email ? { "@type": "ContactPoint", contactType: "customer service", telephone: S.phone || S.whatsapp || void 0, email: S.email || void 0, availableLanguage: ["en", "gu", "hi"] } : void 0,
-      openingHours: S.hours || void 0,
+      telephone: sf.phone || void 0,
+      email: sf.email || void 0,
+      address: sf.address ? { "@type": "PostalAddress", streetAddress: sf.address, addressLocality: sf.city || void 0, addressCountry: "IN" } : void 0,
+      contactPoint: sf.phone || sf.whatsapp || sf.email ? { "@type": "ContactPoint", contactType: "customer service", telephone: sf.phone || sf.whatsapp || void 0, email: sf.email || void 0, availableLanguage: ["en", "gu", "hi"] } : void 0,
+      openingHours: sf.hours || void 0,
       hasMap: map || void 0,
       currenciesAccepted: "INR",
-      hasOfferCatalog: cc.length ? { "@type": "OfferCatalog", name: `${S.name} products`, itemListElement: cc.map((x) => ({ "@type": "OfferCatalog", name: x.name, url: abs(`c/${x.slug}/`), numberOfItems: x.count })) } : void 0,
-      makesOffer: items.slice(0, 50).map((p) => ({ "@type": "Offer", price: rupeesPlain(p.price), priceCurrency: "INR", availability: p.inStock ? "https://schema.org/InStock" : "https://schema.org/OutOfStock", itemOffered: { "@type": "Product", name: p.name, url: abs(`p/${p.slug}/`) } }))
+      hasOfferCatalog: cc.length ? { "@type": "OfferCatalog", name: `${shop.name} products`, itemListElement: cc.map((x) => ({ "@type": "OfferCatalog", name: x.name, url: abs(`c/${x.slug}/`), numberOfItems: x.count })) } : void 0,
+      makesOffer: list.slice(0, 50).map((p) => ({ "@type": "Offer", price: rupeesPlain(p.price), priceCurrency: "INR", availability: p.inStock ? "https://schema.org/InStock" : "https://schema.org/OutOfStock", itemOffered: { "@type": "Product", name: p.name, url: abs(`p/${p.key}/`) } }))
     };
-    const crumbs = { "@context": "https://schema.org", "@type": "BreadcrumbList", itemListElement: [{ "@type": "ListItem", position: 1, name: "Home", item: SITE }, { "@type": "ListItem", position: 2, name: "Shop profile", item: url }] };
+    const crumbs = { "@context": "https://schema.org", "@type": "BreadcrumbList", itemListElement: [{ "@type": "ListItem", position: 1, name: "Home", item: SITE }, { "@type": "ListItem", position: 2, name: "All shops", item: abs("shops/") }, { "@type": "ListItem", position: 3, name: shop.name, item: url }] };
     const contact = [
-      S.address ? `<li>${iconSvg("map", 18)}<span>${esc(S.address)}${S.city ? ", " + esc(S.city) : ""}</span></li>` : "",
-      S.hours ? `<li>\u{1F558} <span>${esc(S.hours)}</span></li>` : "",
-      S.phone ? `<li>${iconSvg("phone", 18)}<a href="tel:${esc(S.phone)}">${esc(S.phone)}</a></li>` : "",
+      sf.address ? `<li>${iconSvg("map", 18)}<span>${esc(sf.address)}${sf.city ? ", " + esc(sf.city) : ""}</span></li>` : "",
+      sf.hours ? `<li>\u{1F558} <span>${esc(sf.hours)}</span></li>` : "",
+      sf.phone ? `<li>${iconSvg("phone", 18)}<a href="tel:${esc(sf.phone)}">${esc(sf.phone)}</a></li>` : "",
       WA ? `<li>${iconSvg("whatsapp", 18)}<a href="https://wa.me/${WA}" target="_blank" rel="noopener">WhatsApp</a></li>` : "",
-      S.email ? `<li>${iconSvg("email", 18)}<a href="mailto:${esc(S.email)}">${esc(S.email)}</a></li>` : "",
+      sf.email ? `<li>${iconSvg("email", 18)}<a href="mailto:${esc(sf.email)}">${esc(sf.email)}</a></li>` : "",
       map ? `<li>\u{1F5FA} <a href="${esc(map)}" target="_blank" rel="noopener">Get directions</a></li>` : ""
     ].join("");
-    const body = `<nav class="crumbs"><a href="${pre}">Home</a> \u203A <span>Shop profile</span></nav><section class="sp-hero"><div class="sp-cover" aria-hidden="true"></div><div class="sp-id">${logoHtml(pre, "sp-logo")}<div><h1 class="sp-name">${esc(S.name)}</h1>${S.tagline ? `<p class="sp-tag">${esc(S.tagline)}</p>` : ""}<p class="sp-meta">${items.length} products${cc.length ? " \xB7 " + cc.length + " categories" : ""}${S.city ? " \xB7 " + esc(S.city) : ""}</p></div></div><div class="sp-actions">${WA ? `<a class="btn wa sm" href="https://wa.me/${WA}" target="_blank" rel="noopener">${iconSvg("whatsapp", 18)} WhatsApp</a>` : ""}${S.phone ? `<a class="btn ghost sm" href="tel:${esc(S.phone)}">${iconSvg("phone", 18)} Call</a>` : ""}<a class="btn ghost sm" id="spShare" href="https://wa.me/?text=${encodeURIComponent(S.name + " \u2013 " + url)}" target="_blank" rel="noopener">${iconSvg("share", 18)} Share</a></div>${socialRow()}</section><section class="box"><h2>About</h2>${(S.about || S.tagline || `${S.name} is an online shop. Browse the products below and order on WhatsApp.`).split(/\n+/).filter(Boolean).map((x) => `<p>${esc(x)}</p>`).join("")}</section>` + (cc.length ? `<section class="box"><h2>What we sell</h2><div class="chips">${cc.map((x) => `<a class="chip" href="${pre}c/${x.slug}/">${esc(x.name)} <span class="cnt">${x.count}</span></a>`).join("")}</div></section>` : "") + `<section><h2 class="sec-title">All products</h2>${items.length ? `<div class="grid">${items.map((p) => cardHtml(p, pre)).join("")}</div>` : '<p class="muted">Products coming soon.</p>'}</section>` + (contact ? `<section class="box"><h2>Contact</h2><ul class="sp-contact">${contact}</ul></section>` : "");
-    write(`${SHOP}index.html`, page(pre, head({ title, desc: desc.slice(0, 300), path: SHOP, image: S._logoRel, type: "profile", extra: jsonLd(ld) + "\n" + jsonLd(crumbs) }), body, { sf: leanSf, items: items.map(lean) }));
-    urls.push({ group: "shop", loc: url, lastmod: [newest, (sf && sf._updated || "").slice(0, 10)].sort().pop() || "", priority: "0.9", images: [{ loc: logoAbs, title: S.name + " logo" }] });
+    const body = `<nav class="crumbs"><a href="${pre}">Home</a> \u203A <a href="${pre}shops/">All shops</a> \u203A <span>${esc(shop.name)}</span></nav><section class="sp-hero"><div class="sp-cover" aria-hidden="true">${shop._coverRel ? `<img class="sp-cover-img" src="${pre}${shop._coverRel}" alt="">` : ""}</div><div class="sp-id">${logoHtml(shop, pre, "sp-logo")}<div><h1 class="sp-name">${esc(shop.name)}</h1>${sf.tagline ? `<p class="sp-tag">${esc(sf.tagline)}</p>` : ""}<p class="sp-meta">${list.length} products${cc.length ? " \xB7 " + cc.length + " categories" : ""}${sf.city ? " \xB7 " + esc(sf.city) : ""}</p></div></div><div class="sp-actions">${WA ? `<a class="btn wa sm" href="https://wa.me/${WA}" target="_blank" rel="noopener">${iconSvg("whatsapp", 18)} WhatsApp</a>` : ""}${sf.phone ? `<a class="btn ghost sm" href="tel:${esc(sf.phone)}">${iconSvg("phone", 18)} Call</a>` : ""}<a class="btn ghost sm" id="spShare" href="https://wa.me/?text=${encodeURIComponent(shop.name + " \u2013 " + url)}" target="_blank" rel="noopener">${iconSvg("share", 18)} Share</a></div>${socialRow(sf)}</section><section class="box"><h2>About</h2>${(sf.about || sf.tagline || `${shop.name} is an online shop. Browse the products below and order on WhatsApp.`).split(/\n+/).filter(Boolean).map((x) => `<p>${esc(x)}</p>`).join("")}</section>` + (cc.length ? `<section class="box"><h2>What we sell</h2><div class="chips">${cc.map((x) => `<a class="chip" href="${pre}c/${x.slug}/">${esc(x.name)} <span class="cnt">${x.count}</span></a>`).join("")}</div></section>` : "") + `<section><h2 class="sec-title">All products</h2>${list.length ? `<div class="grid">${list.map((p) => cardHtml(p, pre)).join("")}</div>` : '<p class="muted">Products coming soon.</p>'}</section>` + (contact ? `<section class="box"><h2>Contact</h2><ul class="sp-contact">${contact}</ul></section>` : "");
+    write(`${SP}index.html`, page(pre, head({ title, desc: desc.slice(0, 300), path: SP, image: shop._coverRel || shop._logoRel, type: "profile", extra: jsonLd(ld) + "\n" + jsonLd(crumbs) }), body, { shops: [leanShop(shop)] }));
+    urls.push({
+      group: "shop",
+      shop: shop.slug,
+      loc: url,
+      lastmod: [list.map(lastmodOf).sort().pop() || "", sfMod(shop)].sort().pop() || "",
+      priority: "0.9",
+      images: [{ loc: logoAbs, title: shop.name + " logo" }, ...shop._coverRel ? [{ loc: abs(shop._coverRel), title: shop.name }] : []]
+    });
+  }
+  {
+    const pre = "../";
+    const ld = {
+      "@context": "https://schema.org",
+      "@type": "CollectionPage",
+      name: `All shops \u2013 ${S.name}`,
+      url: abs("shops/"),
+      mainEntity: { "@type": "ItemList", itemListElement: shops.map((x, i) => ({ "@type": "ListItem", position: i + 1, url: abs(shopUrlPath(x)), name: x.name })) }
+    };
+    const body = `<nav class="crumbs"><a href="${pre}">Home</a> \u203A <span>All shops</span></nav><h1 class="page-title">All shops</h1>` + (shops.length ? `<div class="shop-list">${shops.map((x) => `<a class="shop-tile" href="${pre}${shopUrlPath(x)}">${logoHtml(x, pre, "shop-logo")}<div class="shop-tile-txt"><b>${esc(x.name)}</b>${x.sf.tagline ? `<small>${esc(x.sf.tagline)}</small>` : ""}<small class="muted">${x.items.length} products${sellsLine(x.sf, x.items, 3) ? " \xB7 " + esc(sellsLine(x.sf, x.items, 3)) : ""}</small></div><span class="chev">\u203A</span></a>`).join("")}</div>` : '<p class="muted">Shops coming soon.</p>');
+    write("shops/index.html", page(pre, head({ title: `All shops \u2013 ${S.name}`, desc: `${shops.length} shops sell on ${S.name}: ${shops.slice(0, 8).map((x) => x.name).join(", ")}.`.slice(0, 300), path: "shops/", extra: jsonLd(ld) }), body, { shops: shops.map((x) => leanShop(x, [])) }));
+    urls.push({ loc: abs("shops/"), lastmod: newest, priority: "0.6" });
   }
   write("404.html", page(BASEPATH, head({ title: `Page not found \u2013 ${S.name}`, desc: S.name, path: "", noindex: true }), `<section class="empty"><div class="big">\u{1F9ED}</div><h1>Page not found</h1><p><a class="btn primary" href="${BASEPATH}">Go to the store</a></p></section>`, null));
   const urlset = (list) => [
@@ -443,13 +531,18 @@ async function main() {
     "</urlset>",
     ""
   ].join("\n");
-  const groups = { pages: urls.filter((u) => !u.group), products: urls.filter((u) => u.group === "products"), shop: urls.filter((u) => u.group === "shop") };
+  const files = [
+    ["sitemap-pages.xml", urls.filter((u) => !u.group)],
+    ["sitemap-products.xml", urls.filter((u) => u.group === "products")],
+    ["sitemap-shop.xml", urls.filter((u) => u.group === "shop")],
+    ...shops.map((x) => [`sitemap-shop-${x.slug}.xml`, urls.filter((u) => u.shop === x.slug)])
+  ];
   const today = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
-  for (const [k, list] of Object.entries(groups)) write(`sitemap-${k}.xml`, urlset(list));
+  for (const [f, list] of files) write(f, urlset(list));
   write("sitemap.xml", [
     '<?xml version="1.0" encoding="UTF-8"?>',
     '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
-    ...Object.entries(groups).map(([k, list]) => `  <sitemap><loc>${esc(abs(`sitemap-${k}.xml`))}</loc><lastmod>${list.map((u) => u.lastmod).filter(Boolean).sort().pop() || today}</lastmod></sitemap>`),
+    ...files.map(([f, list]) => `  <sitemap><loc>${esc(abs(f))}</loc><lastmod>${list.map((u) => u.lastmod).filter(Boolean).sort().pop() || today}</lastmod></sitemap>`),
     "</sitemapindex>",
     ""
   ].join("\n"));
@@ -462,7 +555,7 @@ Disallow: ${BASEPATH}checkout/
 Sitemap: ${SITE}sitemap.xml
 Sitemap: ${SITE}sitemap-shop.xml
 `);
-  console.log(`wrote ${urls.length} sitemap URLs, ${items.length} product pages, ${cats.length} category pages, ${[...images.values()].reduce((a, l) => a + l.length, 0)} images`);
+  console.log(`wrote ${urls.length} sitemap URLs, ${files.length} sitemap files, ${items.length} product pages, ${shops.length} shop profiles, ${cats.length} category pages, ${[...images.values()].reduce((a, l) => a + l.length, 0)} images`);
 }
 main().catch((e) => {
   console.error(e);
