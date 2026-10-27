@@ -5,3 +5,4 @@ Disallow: /Bhagirath-webmaker/cart/
 Disallow: /Bhagirath-webmaker/checkout/
 
 Sitemap: https://karenajatin.github.io/Bhagirath-webmaker/sitemap.xml
+Sitemap: https://karenajatin.github.io/Bhagirath-webmaker/sitemap-shop.xml

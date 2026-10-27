@@ -143,6 +143,35 @@ These terms are governed by the laws of India.`
   }
 };
 var policyText = (sf, k) => sf && sf[POLICIES[k].key] && String(sf[POLICIES[k].key]).trim() || POLICIES[k].text(Object.assign({ name: DEFAULT_NAME }, sf || {}));
+var SOCIALS = [["instagram", "Instagram"], ["facebook", "Facebook"], ["youtube", "YouTube"], ["twitter", "X"], ["telegram", "Telegram"], ["linkedin", "LinkedIn"]];
+var socialLinks = (sf) => SOCIALS.map(([k, label]) => ({ k, label, url: safeUrl(sf && sf[k]) })).filter((x) => x.url);
+var shopSlug = (sf) => {
+  const s = catSlug(sf && sf.name || DEFAULT_NAME);
+  return /^c-/.test(s) ? "liveshop" : s;
+};
+var shopPath = (sf) => "shop/" + shopSlug(sf) + "/";
+function catCounts(sf, items) {
+  return categoriesOf(sf, items).map((c) => ({ name: c, slug: catSlug(c), count: items.filter((p) => p.category === c).length }));
+}
+var sellsLine = (sf, items, n = 4) => {
+  const cs = categoriesOf(sf, items);
+  return cs.slice(0, n).join(", ") + (cs.length > n ? " & more" : "");
+};
+var homeTitleOf = (S) => S.name + (S.tagline ? " \u2013 " + S.tagline : " \u2013 Online Shopping: Clothes, Shoes, Watches & More");
+var SOCIAL_ICON = {
+  instagram: "M7 3h10a4 4 0 0 1 4 4v10a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V7a4 4 0 0 1 4-4Zm5 5a4 4 0 1 0 0 8 4 4 0 0 0 0-8Zm5.5-1.5h.01",
+  facebook: "M14 8h3V4h-3a4 4 0 0 0-4 4v3H7v4h3v6h4v-6h3l1-4h-4V8.5a.5.5 0 0 1 .5-.5Z",
+  youtube: "M3 8.5A3.5 3.5 0 0 1 6.5 5h11A3.5 3.5 0 0 1 21 8.5v7a3.5 3.5 0 0 1-3.5 3.5h-11A3.5 3.5 0 0 1 3 15.5v-7ZM10 9v6l5-3-5-3Z",
+  twitter: "M4 4l16 16M20 4L4 20",
+  telegram: "M21 4 3 11l6 2 2 6 3-4 5 4 2-15ZM9 13l9-6-6 8",
+  linkedin: "M4 9h4v11H4V9Zm2-5a2 2 0 1 1 0 4 2 2 0 0 1 0-4Zm4 5h4v1.5c.6-1 1.8-1.8 3.5-1.8 2.6 0 3.5 1.7 3.5 4.3v7h-4v-6c0-1.2-.4-2-1.6-2-1.2 0-1.9.9-1.9 2v6h-3.5V9Z",
+  whatsapp: "M4 20l1.3-4A8 8 0 1 1 8 18.7L4 20Zm5-11c0 3.5 2.5 6 6 6l1.3-1.5-2-1-1 .8c-1-.4-2-1.4-2.5-2.5l.8-1-1-2L9 9Z",
+  phone: "M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2Z",
+  email: "M3 6h18v12H3V6Zm0 0 9 7 9-7",
+  share: "M16 6l-4-4-4 4M12 2v14M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7",
+  map: "M12 21s-7-6.2-7-12a7 7 0 0 1 14 0c0 5.8-7 12-7 12Zm0-9.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z"
+};
+var iconSvg = (k, size = 20) => `<svg viewBox="0 0 24 24" width="${size}" height="${size}" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="${SOCIAL_ICON[k] || ""}"/></svg>`;
 
 // store/generate.mjs
 var args = Object.fromEntries(process.argv.slice(2).map((a) => {
@@ -192,7 +221,7 @@ async function main() {
   items = visibleProducts(items).sort((a, b) => a.name.localeCompare(b.name));
   const cats = categoriesOf(S, items);
   console.log(`shop=${shopId || "(none yet)"} name="${S.name}" products=${items.length} categories=${cats.length}`);
-  for (const d of ["p", "c", "img", "about", "policy"]) rmSync(join(ROOT, d), { recursive: true, force: true });
+  for (const d of ["p", "c", "img", "about", "policy", "shop"]) rmSync(join(ROOT, d), { recursive: true, force: true });
   const images = /* @__PURE__ */ new Map();
   const withImgs = items.filter((p) => p.imageCount > 0);
   for (let i = 0; i < withImgs.length; i += 8) {
@@ -262,8 +291,15 @@ async function main() {
     `<meta property="og:locale" content="en_IN">`,
     extra
   ].join("\n");
-  const topbar = (pre) => `<header class="top"><div class="top-row wrap"><a class="logo" href="${pre}"><span class="logo-mark">${esc((S.name || "L")[0])}</span><span class="logo-name">${esc(S.name)}</span></a><div class="top-actions"><a class="ic-btn" href="${pre}cart/" aria-label="Cart">\u{1F6D2}</a></div></div></header>`;
-  const foot = (pre) => `<footer class="foot"><div class="wrap foot-grid"><div><b class="foot-name">${esc(S.name)}</b>${S.tagline ? `<p>${esc(S.tagline)}</p>` : ""}${S.address ? `<p>\u{1F4CD} ${esc(S.address)}</p>` : ""}${S.phone ? `<p>\u{1F4DE} <a href="tel:${esc(S.phone)}">${esc(S.phone)}</a></p>` : ""}${S.email ? `<p>\u2709\uFE0F <a href="mailto:${esc(S.email)}">${esc(S.email)}</a></p>` : ""}</div>` + (cats.length ? `<div><b>Shop by category</b><ul>${cats.map((c) => `<li><a href="${pre}c/${catSlug(c)}/">${esc(c)}</a></li>`).join("")}</ul></div>` : "") + `<div><b>Policies</b><ul><li><a href="${pre}about/">About &amp; contact</a></li>${Object.keys(POLICIES).map((k) => `<li><a href="${pre}policy/${k}/">${esc(POLICIES[k].title)}</a></li>`).join("")}</ul></div></div><div class="wrap foot-bottom"><span>\xA9 ${esc(S.name)}</span><a class="staff-link" rel="nofollow" href="${pre}panel/">Shopkeeper login</a></div></footer>`;
+  const SHOP = shopPath(S);
+  const SOC = socialLinks(S);
+  const WA = waNumber(S.whatsapp || S.phone);
+  const SELLS = sellsLine(S, items);
+  const logoHtml = (pre, cls) => S._logoRel ? `<img class="${cls}" src="${pre}${S._logoRel}" alt="${esc(S.name)} logo" width="64" height="64">` : `<span class="${cls} mono">${esc((S.name || "L")[0].toUpperCase())}</span>`;
+  const socialRow = () => SOC.length ? `<div class="soc-row">${SOC.map((s) => `<a class="soc soc-${s.k}" href="${esc(s.url)}" target="_blank" rel="noopener me" aria-label="${esc(s.label)}" title="${esc(s.label)}">${iconSvg(s.k)}</a>`).join("")}</div>` : "";
+  const shopCardHtml = (pre) => `<section class="shopcard" aria-label="Sold by"><div class="shopcard-head">${logoHtml(pre, "shop-logo")}<div class="shopcard-txt"><small class="muted">Sold by</small><a class="shopcard-name" href="${pre}${SHOP}">${esc(S.name)}</a>${S.tagline ? `<p class="shopcard-tag">${esc(S.tagline)}</p>` : ""}${SELLS ? `<p class="shopcard-sells">Sells: ${esc(SELLS)}</p>` : ""}</div></div><div class="shopcard-btns"><a class="btn primary sm" href="${pre}${SHOP}">View shop profile</a>${WA ? `<a class="btn wa-o sm" href="https://wa.me/${WA}" target="_blank" rel="noopener">${iconSvg("whatsapp", 18)} WhatsApp</a>` : ""}${S.phone ? `<a class="btn ghost sm" href="tel:${esc(S.phone)}">${iconSvg("phone", 18)} Call</a>` : ""}</div>${socialRow()}</section>`;
+  const topbar = (pre) => `<header class="top"><div class="top-row wrap"><a class="logo" href="${pre}"><span class="logo-mark">${esc((S.name || "L")[0])}</span><span class="logo-name">${esc(S.name)}</span></a><div class="top-actions"><a class="ic-btn" href="${pre}${SHOP}" aria-label="Shop profile" title="Shop profile">\u{1F3EA}</a><a class="ic-btn" href="${pre}cart/" aria-label="Cart">\u{1F6D2}</a></div></div></header>`;
+  const foot = (pre) => `<footer class="foot"><div class="wrap foot-grid"><div><b class="foot-name">${esc(S.name)}</b>${S.tagline ? `<p>${esc(S.tagline)}</p>` : ""}${S.address ? `<p>\u{1F4CD} ${esc(S.address)}</p>` : ""}${S.phone ? `<p>\u{1F4DE} <a href="tel:${esc(S.phone)}">${esc(S.phone)}</a></p>` : ""}${S.email ? `<p>\u2709\uFE0F <a href="mailto:${esc(S.email)}">${esc(S.email)}</a></p>` : ""}</div>` + (cats.length ? `<div><b>Shop by category</b><ul>${cats.map((c) => `<li><a href="${pre}c/${catSlug(c)}/">${esc(c)}</a></li>`).join("")}</ul></div>` : "") + `<div><b>Policies</b><ul><li><a href="${pre}${SHOP}">Shop profile</a></li><li><a href="${pre}about/">About &amp; contact</a></li>${Object.keys(POLICIES).map((k) => `<li><a href="${pre}policy/${k}/">${esc(POLICIES[k].title)}</a></li>`).join("")}</ul></div></div><div class="wrap foot-bottom"><span>\xA9 ${esc(S.name)}</span><a class="staff-link" rel="nofollow" href="${pre}panel/">Shopkeeper login</a></div></footer>`;
   const cardHtml = (p, pre) => {
     const img = firstImg(p);
     const off = pctOff(p.price, p.mrp);
@@ -274,7 +310,7 @@ async function main() {
   const urls = [];
   const lastmodOf = (p) => (p._updated || "").slice(0, 10);
   const newest = items.map(lastmodOf).sort().pop() || "";
-  const homeTitle = S.name + (S.tagline ? " \u2013 " + S.tagline : " \u2013 Online Shopping: Clothes, Shoes, Watches & More");
+  const homeTitle = homeTitleOf(S);
   const homeDesc = (S.tagline ? S.tagline + ". " : "") + `Shop ${cats.length ? cats.join(", ") : "products"} online at ${S.name}. Pay by UPI or cash, order on WhatsApp.`;
   const homeBody = `<section class="hero"><h1>${esc(S.name)}</h1>${S.tagline ? `<p class="tagline">${esc(S.tagline)}</p>` : ""}</section>` + (cats.length ? `<div class="chips-wrap"><div class="chips">${cats.map((c) => `<a class="chip" href="c/${catSlug(c)}/">${esc(c)}</a>`).join("")}</div></div>` : "") + (items.length ? `<section class="grid">${items.map((p) => cardHtml(p, "")).join("")}</section>` : `<section class="empty soon"><div class="big">\u{1F6CD}\uFE0F</div><h2>Products coming soon</h2></section>`);
   write("index.html", page("", head({ title: homeTitle, desc: homeDesc.slice(0, 300), path: "", image: S._logoRel, extra: verify + "\n" + jsonLd(org) + "\n" + jsonLd(website) }), homeBody, { sf: leanSf, items: items.map(lean) }));
@@ -302,7 +338,7 @@ async function main() {
         price: rupeesPlain(p.price),
         availability: p.inStock ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
         itemCondition: "https://schema.org/NewCondition",
-        seller: { "@type": "Organization", name: S.name }
+        seller: { "@type": "OnlineStore", name: S.name, url: abs(SHOP) }
       }
     };
     const crumbs = { "@context": "https://schema.org", "@type": "BreadcrumbList", itemListElement: [
@@ -310,7 +346,7 @@ async function main() {
       ...p.category ? [{ "@type": "ListItem", position: 2, name: p.category, item: abs(`c/${catSlug(p.category)}/`) }] : [],
       { "@type": "ListItem", position: p.category ? 3 : 2, name: p.name, item: abs(`p/${p.slug}/`) }
     ] };
-    const body = `<nav class="crumbs"><a href="${pre}">Home</a>${p.category ? ` \u203A <a href="${pre}c/${catSlug(p.category)}/">${esc(p.category)}</a>` : ""} \u203A <span>${esc(p.name)}</span></nav><div class="pdp"><div class="pdp-grid"><div class="pdp-media"><div class="gallery">${imgs.length ? imgs.map((im, i) => `<div class="slide"><img class="gimg" src="${pre}${im}" alt="${esc(p.name)} ${i + 1}" width="800" height="800"></div>`).join("") : '<div class="slide"><div class="gimg ph"><span>\u{1F6CD}\uFE0F</span></div></div>'}</div></div><div class="pdp-info"><h1 class="pdp-name">${esc(p.name)}</h1><div class="price big"><b>${rupees(p.price)}</b>${off ? `<s>${rupees(p.mrp)}</s><span class="off">${off}% off</span>` : ""}</div><div class="stock ${p.inStock ? "ok" : "no"}">\u25CF ${p.inStock ? "In stock" : "Out of stock"}</div>` + (p.description ? `<section class="desc"><h2>Description</h2>${p.description.split(/\n+/).map((x) => `<p>${esc(x)}</p>`).join("")}</section>` : "") + `<table class="specs"><tbody>${p.category ? `<tr><th>Category</th><td>${esc(p.category)}</td></tr>` : ""}${p.unit ? `<tr><th>Unit</th><td>${esc(p.unit)}</td></tr>` : ""}</tbody></table></div></div></div>`;
+    const body = `<nav class="crumbs"><a href="${pre}">Home</a>${p.category ? ` \u203A <a href="${pre}c/${catSlug(p.category)}/">${esc(p.category)}</a>` : ""} \u203A <span>${esc(p.name)}</span></nav><div class="pdp"><div class="pdp-grid"><div class="pdp-media"><div class="gallery">${imgs.length ? imgs.map((im, i) => `<div class="slide"><img class="gimg" src="${pre}${im}" alt="${esc(p.name)} ${i + 1}" width="800" height="800"></div>`).join("") : '<div class="slide"><div class="gimg ph"><span>\u{1F6CD}\uFE0F</span></div></div>'}</div></div><div class="pdp-info"><h1 class="pdp-name">${esc(p.name)}</h1><div class="price big"><b>${rupees(p.price)}</b>${off ? `<s>${rupees(p.mrp)}</s><span class="off">${off}% off</span>` : ""}</div><div class="stock ${p.inStock ? "ok" : "no"}">\u25CF ${p.inStock ? "In stock" : "Out of stock"}</div>` + (p.description ? `<section class="desc"><h2>Description</h2>${p.description.split(/\n+/).map((x) => `<p>${esc(x)}</p>`).join("")}</section>` : "") + `<table class="specs"><tbody>${p.category ? `<tr><th>Category</th><td>${esc(p.category)}</td></tr>` : ""}${p.unit ? `<tr><th>Unit</th><td>${esc(p.unit)}</td></tr>` : ""}</tbody></table>${shopCardHtml(pre)}</div></div></div>`;
     write(`p/${p.slug}/index.html`, page(pre, head({
       title,
       desc: desc.slice(0, 300),
@@ -320,7 +356,7 @@ async function main() {
       extra: `<meta property="product:price:amount" content="${rupeesPlain(p.price)}"><meta property="product:price:currency" content="INR">
 ` + jsonLd(ld) + "\n" + jsonLd(crumbs)
     }), body, { sf: leanSf, items: [lean(p)] }));
-    urls.push({ loc: abs(`p/${p.slug}/`), lastmod: lastmodOf(p), priority: "0.8", images: imgs.map((im) => ({ loc: abs(im), title: p.name })) });
+    urls.push({ group: "products", loc: abs(`p/${p.slug}/`), lastmod: lastmodOf(p), priority: "0.8", images: imgs.map((im) => ({ loc: abs(im), title: p.name })) });
   }
   for (const c of cats) {
     const pre = "../../";
@@ -341,7 +377,7 @@ async function main() {
     const pre = "../";
     const map = safeUrl(S.mapUrl);
     const wa = waNumber(S.whatsapp || S.phone);
-    const body = `<h1 class="page-title">About ${esc(S.name)}</h1><section class="box">${S.tagline ? `<p>${esc(S.tagline)}</p>` : ""}${(S.about || "").split(/\n+/).filter(Boolean).map((x) => `<p>${esc(x)}</p>`).join("")}</section><section class="box"><h2>Contact us</h2>${S.address ? `<p>\u{1F4CD} ${esc(S.address)}${S.city ? ", " + esc(S.city) : ""}</p>` : ""}${S.hours ? `<p>\u{1F558} ${esc(S.hours)}</p>` : ""}${S.phone ? `<p>\u{1F4DE} <a href="tel:${esc(S.phone)}">${esc(S.phone)}</a></p>` : ""}${wa ? `<p>\u{1F4AC} <a href="https://wa.me/${wa}">WhatsApp</a></p>` : ""}${S.email ? `<p>\u2709\uFE0F <a href="mailto:${esc(S.email)}">${esc(S.email)}</a></p>` : ""}${map ? `<p>\u{1F5FA} <a href="${esc(map)}">Get directions</a></p>` : ""}</section>`;
+    const body = `<h1 class="page-title">About ${esc(S.name)}</h1><p><a class="btn ghost sm" href="${pre}${SHOP}">\u{1F3EA} View our shop profile</a></p><section class="box">${S.tagline ? `<p>${esc(S.tagline)}</p>` : ""}${(S.about || "").split(/\n+/).filter(Boolean).map((x) => `<p>${esc(x)}</p>`).join("")}</section><section class="box"><h2>Contact us</h2>${S.address ? `<p>\u{1F4CD} ${esc(S.address)}${S.city ? ", " + esc(S.city) : ""}</p>` : ""}${S.hours ? `<p>\u{1F558} ${esc(S.hours)}</p>` : ""}${S.phone ? `<p>\u{1F4DE} <a href="tel:${esc(S.phone)}">${esc(S.phone)}</a></p>` : ""}${wa ? `<p>\u{1F4AC} <a href="https://wa.me/${wa}">WhatsApp</a></p>` : ""}${S.email ? `<p>\u2709\uFE0F <a href="mailto:${esc(S.email)}">${esc(S.email)}</a></p>` : ""}${map ? `<p>\u{1F5FA} <a href="${esc(map)}">Get directions</a></p>` : ""}</section>`;
     write("about/index.html", page(pre, head({ title: `About & Contact \u2013 ${S.name}`, desc: `Contact ${S.name}${S.address ? ", " + S.address : ""}${S.phone ? ", phone " + S.phone : ""}.`.slice(0, 300), path: "about/", extra: jsonLd(org) }), body, null));
     urls.push({ loc: abs("about/"), lastmod: (sf && sf._updated || "").slice(0, 10), priority: "0.5" });
   }
@@ -356,15 +392,67 @@ async function main() {
     ));
     urls.push({ loc: abs(`policy/${k}/`), lastmod: (sf && sf._updated || "").slice(0, 10), priority: "0.3" });
   }
+  {
+    const pre = "../../";
+    const map = safeUrl(S.mapUrl);
+    const cc = catCounts(S, items);
+    const url = abs(SHOP);
+    const logoAbs = S._logoRel ? abs(S._logoRel) : abs("icons/icon-512.png");
+    const catWords = cc.slice(0, 4).map((x) => x.name).join(", ");
+    const title = `${S.name} \u2013 Shop Profile${catWords ? " | " + catWords : ""}`;
+    const desc = `${S.name}${S.tagline ? " \u2013 " + S.tagline : ""}. ${cc.length ? "Sells " + cc.map((x) => x.name).join(", ") + ". " : ""}${items.length} products online. Order on WhatsApp, pay by UPI or cash.`;
+    const sameAs = SOC.map((s) => s.url);
+    const ld = {
+      "@context": "https://schema.org",
+      "@type": "OnlineStore",
+      "@id": url + "#shop",
+      name: S.name,
+      url,
+      logo: logoAbs,
+      image: logoAbs,
+      description: (S.about || S.tagline || `${S.name} online shop`).slice(0, 500),
+      sameAs: sameAs.length ? sameAs : void 0,
+      telephone: S.phone || void 0,
+      email: S.email || void 0,
+      address: S.address ? { "@type": "PostalAddress", streetAddress: S.address, addressLocality: S.city || void 0, addressCountry: "IN" } : void 0,
+      contactPoint: S.phone || S.whatsapp || S.email ? { "@type": "ContactPoint", contactType: "customer service", telephone: S.phone || S.whatsapp || void 0, email: S.email || void 0, availableLanguage: ["en", "gu", "hi"] } : void 0,
+      openingHours: S.hours || void 0,
+      hasMap: map || void 0,
+      currenciesAccepted: "INR",
+      hasOfferCatalog: cc.length ? { "@type": "OfferCatalog", name: `${S.name} products`, itemListElement: cc.map((x) => ({ "@type": "OfferCatalog", name: x.name, url: abs(`c/${x.slug}/`), numberOfItems: x.count })) } : void 0,
+      makesOffer: items.slice(0, 50).map((p) => ({ "@type": "Offer", price: rupeesPlain(p.price), priceCurrency: "INR", availability: p.inStock ? "https://schema.org/InStock" : "https://schema.org/OutOfStock", itemOffered: { "@type": "Product", name: p.name, url: abs(`p/${p.slug}/`) } }))
+    };
+    const crumbs = { "@context": "https://schema.org", "@type": "BreadcrumbList", itemListElement: [{ "@type": "ListItem", position: 1, name: "Home", item: SITE }, { "@type": "ListItem", position: 2, name: "Shop profile", item: url }] };
+    const contact = [
+      S.address ? `<li>${iconSvg("map", 18)}<span>${esc(S.address)}${S.city ? ", " + esc(S.city) : ""}</span></li>` : "",
+      S.hours ? `<li>\u{1F558} <span>${esc(S.hours)}</span></li>` : "",
+      S.phone ? `<li>${iconSvg("phone", 18)}<a href="tel:${esc(S.phone)}">${esc(S.phone)}</a></li>` : "",
+      WA ? `<li>${iconSvg("whatsapp", 18)}<a href="https://wa.me/${WA}" target="_blank" rel="noopener">WhatsApp</a></li>` : "",
+      S.email ? `<li>${iconSvg("email", 18)}<a href="mailto:${esc(S.email)}">${esc(S.email)}</a></li>` : "",
+      map ? `<li>\u{1F5FA} <a href="${esc(map)}" target="_blank" rel="noopener">Get directions</a></li>` : ""
+    ].join("");
+    const body = `<nav class="crumbs"><a href="${pre}">Home</a> \u203A <span>Shop profile</span></nav><section class="sp-hero"><div class="sp-cover" aria-hidden="true"></div><div class="sp-id">${logoHtml(pre, "sp-logo")}<div><h1 class="sp-name">${esc(S.name)}</h1>${S.tagline ? `<p class="sp-tag">${esc(S.tagline)}</p>` : ""}<p class="sp-meta">${items.length} products${cc.length ? " \xB7 " + cc.length + " categories" : ""}${S.city ? " \xB7 " + esc(S.city) : ""}</p></div></div><div class="sp-actions">${WA ? `<a class="btn wa sm" href="https://wa.me/${WA}" target="_blank" rel="noopener">${iconSvg("whatsapp", 18)} WhatsApp</a>` : ""}${S.phone ? `<a class="btn ghost sm" href="tel:${esc(S.phone)}">${iconSvg("phone", 18)} Call</a>` : ""}<a class="btn ghost sm" id="spShare" href="https://wa.me/?text=${encodeURIComponent(S.name + " \u2013 " + url)}" target="_blank" rel="noopener">${iconSvg("share", 18)} Share</a></div>${socialRow()}</section><section class="box"><h2>About</h2>${(S.about || S.tagline || `${S.name} is an online shop. Browse the products below and order on WhatsApp.`).split(/\n+/).filter(Boolean).map((x) => `<p>${esc(x)}</p>`).join("")}</section>` + (cc.length ? `<section class="box"><h2>What we sell</h2><div class="chips">${cc.map((x) => `<a class="chip" href="${pre}c/${x.slug}/">${esc(x.name)} <span class="cnt">${x.count}</span></a>`).join("")}</div></section>` : "") + `<section><h2 class="sec-title">All products</h2>${items.length ? `<div class="grid">${items.map((p) => cardHtml(p, pre)).join("")}</div>` : '<p class="muted">Products coming soon.</p>'}</section>` + (contact ? `<section class="box"><h2>Contact</h2><ul class="sp-contact">${contact}</ul></section>` : "");
+    write(`${SHOP}index.html`, page(pre, head({ title, desc: desc.slice(0, 300), path: SHOP, image: S._logoRel, type: "profile", extra: jsonLd(ld) + "\n" + jsonLd(crumbs) }), body, { sf: leanSf, items: items.map(lean) }));
+    urls.push({ group: "shop", loc: url, lastmod: [newest, (sf && sf._updated || "").slice(0, 10)].sort().pop() || "", priority: "0.9", images: [{ loc: logoAbs, title: S.name + " logo" }] });
+  }
   write("404.html", page(BASEPATH, head({ title: `Page not found \u2013 ${S.name}`, desc: S.name, path: "", noindex: true }), `<section class="empty"><div class="big">\u{1F9ED}</div><h1>Page not found</h1><p><a class="btn primary" href="${BASEPATH}">Go to the store</a></p></section>`, null));
-  const xml = [
+  const urlset = (list) => [
     '<?xml version="1.0" encoding="UTF-8"?>',
     '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">',
-    ...urls.map((u) => `  <url><loc>${esc(u.loc)}</loc>${u.lastmod ? `<lastmod>${u.lastmod}</lastmod>` : ""}<priority>${u.priority}</priority>${(u.images || []).map((im) => `<image:image><image:loc>${esc(im.loc)}</image:loc><image:title>${esc(im.title)}</image:title></image:image>`).join("")}</url>`),
+    ...list.map((u) => `  <url><loc>${esc(u.loc)}</loc>${u.lastmod ? `<lastmod>${u.lastmod}</lastmod>` : ""}<priority>${u.priority}</priority>${(u.images || []).map((im) => `<image:image><image:loc>${esc(im.loc)}</image:loc><image:title>${esc(im.title)}</image:title></image:image>`).join("")}</url>`),
     "</urlset>",
     ""
   ].join("\n");
-  write("sitemap.xml", xml);
+  const groups = { pages: urls.filter((u) => !u.group), products: urls.filter((u) => u.group === "products"), shop: urls.filter((u) => u.group === "shop") };
+  const today = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+  for (const [k, list] of Object.entries(groups)) write(`sitemap-${k}.xml`, urlset(list));
+  write("sitemap.xml", [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+    ...Object.entries(groups).map(([k, list]) => `  <sitemap><loc>${esc(abs(`sitemap-${k}.xml`))}</loc><lastmod>${list.map((u) => u.lastmod).filter(Boolean).sort().pop() || today}</lastmod></sitemap>`),
+    "</sitemapindex>",
+    ""
+  ].join("\n"));
   write("robots.txt", `User-agent: *
 Allow: /
 Disallow: ${BASEPATH}panel/
@@ -372,6 +460,7 @@ Disallow: ${BASEPATH}cart/
 Disallow: ${BASEPATH}checkout/
 
 Sitemap: ${SITE}sitemap.xml
+Sitemap: ${SITE}sitemap-shop.xml
 `);
   console.log(`wrote ${urls.length} sitemap URLs, ${items.length} product pages, ${cats.length} category pages, ${[...images.values()].reduce((a, l) => a + l.length, 0)} images`);
 }
