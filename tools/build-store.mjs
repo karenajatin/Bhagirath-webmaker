@@ -274,7 +274,7 @@ async function main() {
   const urls = [];
   const lastmodOf = (p) => (p._updated || "").slice(0, 10);
   const newest = items.map(lastmodOf).sort().pop() || "";
-  const homeTitle = S.name + (S.tagline ? " \u2013 " + S.tagline : cats.length ? " \u2013 " + cats.slice(0, 4).join(", ") : " \u2013 Online Shopping: Clothes, Shoes, Watches & More");
+  const homeTitle = S.name + (S.tagline ? " \u2013 " + S.tagline : " \u2013 Online Shopping: Clothes, Shoes, Watches & More");
   const homeDesc = (S.tagline ? S.tagline + ". " : "") + `Shop ${cats.length ? cats.join(", ") : "products"} online at ${S.name}. Pay by UPI or cash, order on WhatsApp.`;
   const homeBody = `<section class="hero"><h1>${esc(S.name)}</h1>${S.tagline ? `<p class="tagline">${esc(S.tagline)}</p>` : ""}</section>` + (cats.length ? `<div class="chips-wrap"><div class="chips">${cats.map((c) => `<a class="chip" href="c/${catSlug(c)}/">${esc(c)}</a>`).join("")}</div></div>` : "") + (items.length ? `<section class="grid">${items.map((p) => cardHtml(p, "")).join("")}</section>` : `<section class="empty soon"><div class="big">\u{1F6CD}\uFE0F</div><h2>Products coming soon</h2></section>`);
   write("index.html", page("", head({ title: homeTitle, desc: homeDesc.slice(0, 300), path: "", image: S._logoRel, extra: verify + "\n" + jsonLd(org) + "\n" + jsonLd(website) }), homeBody, { sf: leanSf, items: items.map(lean) }));
