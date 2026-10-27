@@ -1,8 +1,8 @@
 // Service worker for the store + shop panel — offline shell. Data offline is handled by Firestore's cache (panel)
 // and a saved copy of the catalog (store).
-const V = 'ls-33871685';
+const V = 'ls-34498164';
 const R = (p) => new URL(p, self.location).href;
-const SHELL = ['./', './store.js?v=33871685', './store.css?v=33871685', './firebase-config.js?v=33871685', './panel/', './panel/app.js?v=33871685', './panel/app.css?v=33871685',
+const SHELL = ['./', './store.js?v=34498164', './store.css?v=34498164', './firebase-config.js?v=34498164', './panel/', './panel/app.js?v=34498164', './panel/app.css?v=34498164',
   './panel/manifest.webmanifest', './icons/logo.svg', './icons/icon-192.png'].map(R);
 self.addEventListener('install', (e) => { e.waitUntil(caches.open(V).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', (e) => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== V).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
