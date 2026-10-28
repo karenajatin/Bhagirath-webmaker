@@ -48,7 +48,19 @@ jobs:
             echo "CHANGED=0" >> "$GITHUB_ENV"
           else
             git commit -m "Update store pages and sitemap"
-            git push
+            if ! git push; then
+              echo "main moved while building; rebuilding on the latest commit"
+              git fetch origin main
+              git reset --hard origin/main
+              node tools/build-store.mjs
+              git add -A
+              if git diff --cached --quiet; then
+                echo "Already up to date"
+              else
+                git commit -m "Update store pages and sitemap"
+                git push
+              fi
+            fi
             echo "CHANGED=1" >> "$GITHUB_ENV"
           fi
       - name: Publish to GitHub Pages
