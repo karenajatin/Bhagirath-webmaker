@@ -4,11 +4,38 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import vm from "node:vm";
 
+// store/brand.js
+var SITE_NAME = "LiveShop Platform India";
+var SITE_SHORT = "LiveShop";
+var SHOP_SUFFIX = "Shop India";
+var norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+var BRAND_WORDS = [.../* @__PURE__ */ new Set(["liveshop", norm(SITE_NAME), norm(SITE_SHORT), "liveshopindia", "liveshopplatform"])];
+var isBrandWord = (n) => BRAND_WORDS.includes(norm(n));
+function shopBaseName(n) {
+  let s = String(n || "").replace(/\s+/g, " ").trim();
+  for (let i = 0; i < 5; i++) {
+    const t2 = s.replace(/[\s\-–—,.|:]*\bshop[\s\-–—_.]*india$/i, "").trim();
+    if (t2 === s) break;
+    s = t2;
+  }
+  const t = s.replace(/[\s\-–—,.|:]+shop$/i, "").trim();
+  if (t) s = t;
+  return s.replace(/[\s\-–—,.|:]+$/, "").slice(0, 80 - SHOP_SUFFIX.length - 1).trim();
+}
+var shopFullName = (n) => {
+  const b = shopBaseName(n);
+  return b ? b + " " + SHOP_SUFFIX : "";
+};
+var isBrandName = (n) => isBrandWord(n) || isBrandWord(shopBaseName(n));
+
 // store/common.js
-var DEFAULT_NAME = "LiveShop";
-var BRAND = DEFAULT_NAME;
+var DEFAULT_NAME = SITE_NAME;
+var BRAND = SITE_NAME;
+var brandParts = (n = SITE_NAME) => {
+  const i = String(n).indexOf(" ");
+  return i > 0 ? [n.slice(0, i), n.slice(i + 1)] : [String(n), ""];
+};
 var BRAND_TAGLINE = "Online Shopping: Clothes, Shoes, Watches & More";
-var isBrandName = (n) => String(n || "").toLowerCase().replace(/[^a-z0-9]/g, "") === "liveshop";
 var BRAND_SLUGS = ["liveshop", "live-shop", "shop", "shops"];
 var DEFAULT_CATS = ["Clothes", "Stationery", "Household", "Shoes", "Wearables", "Other"];
 function restBase(cfg) {
@@ -150,7 +177,7 @@ var policyText = (sf, k) => sf && sf[POLICIES[k].key] && String(sf[POLICIES[k].k
 var SOCIALS = [["instagram", "Instagram"], ["facebook", "Facebook"], ["youtube", "YouTube"], ["twitter", "X"], ["telegram", "Telegram"], ["linkedin", "LinkedIn"]];
 var socialLinks = (sf) => SOCIALS.map(([k, label]) => ({ k, label, url: safeUrl(sf && sf[k]) })).filter((x) => x.url);
 var shopSlug = (sf, id) => {
-  const s = catSlug(sf && sf.name || "");
+  const s = catSlug(shopBaseName(sf && sf.name || ""));
   return !s || /^c-/.test(s) || BRAND_SLUGS.includes(s) ? "shop-" + String(id || "x").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 8) : s;
 };
 function catCounts(sf, items) {
@@ -223,7 +250,7 @@ async function loadShops(cfg, fetchFn = fetch) {
   return { homeId, marketOn, shops };
 }
 function finishShop(s, sf, items) {
-  const nm = [sf && sf.name, s.name].map((x) => String(x || "").trim()).find((x) => x && !isBrandName(x)) || "";
+  const nm = shopFullName([sf && sf.name, s.name].map((x) => String(x || "").trim()).find((x) => x && !isBrandName(x)) || "");
   const shop = Object.assign({}, s, { name: nm, sf: Object.assign({ delivery: true, pickup: true, cod: true, upi: true }, sf || {}, { name: nm }) });
   const slugOk = s.slug && !BRAND_SLUGS.includes(s.slug);
   shop.listed = !!nm;
@@ -337,6 +364,7 @@ async function main() {
     "@type": "OnlineStore",
     "@id": SITE + "#store",
     name: S.name,
+    alternateName: SITE_SHORT,
     url: SITE,
     description: "Online shopping from local shops: " + BRAND_TAGLINE.replace(/^Online Shopping: /, ""),
     logo: abs("icons/icon-512.png"),
@@ -348,7 +376,7 @@ async function main() {
     "@context": "https://schema.org",
     "@type": "WebSite",
     name: S.name,
-    alternateName: S.name.replace(/\s+/g, ""),
+    alternateName: SITE_SHORT,
     url: SITE,
     potentialAction: { "@type": "SearchAction", target: SITE + "?q={search_term_string}", "query-input": "required name=search_term_string" }
   };
@@ -379,7 +407,7 @@ async function main() {
     const SELLS = sellsLine(sf, shop.items);
     return `<section class="shopcard" aria-label="Sold by"><div class="shopcard-head">${logoHtml(shop, pre, "shop-logo")}<div class="shopcard-txt"><small class="muted">Sold by</small><a class="shopcard-name" href="${pre}${SP}">${esc(shop.name)}</a>${sf.tagline ? `<p class="shopcard-tag">${esc(sf.tagline)}</p>` : ""}${SELLS ? `<p class="shopcard-sells">Sells: ${esc(SELLS)}</p>` : ""}</div></div><div class="shopcard-btns"><a class="btn primary sm" href="${pre}${SP}">View shop profile</a>${WA ? `<a class="btn wa-o sm" href="https://wa.me/${WA}" target="_blank" rel="noopener">${iconSvg("whatsapp", 18)} WhatsApp</a>` : ""}${sf.phone ? `<a class="btn ghost sm" href="tel:${esc(sf.phone)}">${iconSvg("phone", 18)} Call</a>` : ""}</div>${socialRow(sf)}</section>`;
   };
-  const topbar = (pre) => `<header class="top"><div class="top-row wrap"><a class="logo" href="${pre}"><span class="logo-mark">${esc((S.name || "L")[0])}</span><span class="logo-name">${esc(S.name)}</span></a><div class="top-actions"><a class="ic-btn" href="${pre}shops/" aria-label="All shops" title="All shops">\u{1F3EA}</a><a class="ic-btn" href="${pre}cart/" aria-label="Cart">\u{1F6D2}</a></div></div></header>`;
+  const topbar = (pre) => `<header class="top"><div class="top-row wrap"><a class="logo" href="${pre}"><span class="logo-mark">${esc((S.name || "L")[0])}</span><span class="logo-name">${brandParts(S.name).map((x, i) => x ? i ? `<small>${esc(x)}</small>` : `<b>${esc(x)}</b>` : "").join("")}</span></a><div class="top-actions"><a class="ic-btn" href="${pre}shops/" aria-label="All shops" title="All shops">\u{1F3EA}</a><a class="ic-btn" href="${pre}cart/" aria-label="Cart">\u{1F6D2}</a></div></div></header>`;
   const foot = (pre) => `<footer class="foot"><div class="wrap foot-grid"><div><b class="foot-name">${esc(S.name)}</b><p>Online shopping from local shops</p>${profiled.length ? `<p><a href="${pre}shops/">${profiled.length} shop${profiled.length > 1 ? "s" : ""} on ${esc(S.name)}</a></p>` : ""}</div>` + (cats.length ? `<div><b>Shop by category</b><ul>${cats.map((c) => `<li><a href="${pre}c/${catSlug(c)}/">${esc(c)}</a></li>`).join("")}</ul></div>` : "") + `<div><b>Policies</b><ul><li><a href="${pre}shops/">All shops</a></li><li><a href="${pre}about/">About &amp; contact</a></li>${Object.keys(POLICIES).map((k) => `<li><a href="${pre}policy/${k}/">${esc(POLICIES[k].title)}</a></li>`).join("")}</ul></div></div><div class="wrap foot-bottom"><span>\xA9 ${esc(S.name)}</span><a class="staff-link" rel="nofollow" href="${pre}panel/">Shopkeeper login</a></div></footer>`;
   const cardHtml = (p, pre) => {
     const img = firstImg(p);
@@ -495,6 +523,7 @@ async function main() {
       "@type": "Store",
       "@id": url + "#shop",
       name: shop.name,
+      alternateName: shopBaseName(shop.name) || void 0,
       url,
       logo: logoAbs,
       image: shop._coverRel ? [logoAbs, abs(shop._coverRel)] : logoAbs,
