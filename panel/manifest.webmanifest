@@ -1,6 +1,6 @@
 {
- "name": "Shop panel — Bhagiratha",
- "short_name": "Shop panel",
+ "name": "LiveShop – Seller panel",
+ "short_name": "LiveShop",
  "description": "Shop billing, stock, khata and reports",
  "start_url": "./",
  "scope": "./",
