@@ -539,7 +539,7 @@ async function main() {
       keywords: sells.length ? sells.join(", ") : void 0,
       isPartOf: { "@type": "WebSite", name: S.name, url: SITE },
       hasOfferCatalog: cc.length ? { "@type": "OfferCatalog", name: `${shop.name} products`, itemListElement: cc.map((x) => ({ "@type": "OfferCatalog", name: x.name, url: abs(`c/${x.slug}/`), numberOfItems: x.count })) } : void 0,
-      makesOffer: list.slice(0, 50).map((p) => ({ "@type": "Offer", price: rupeesPlain(p.price), priceCurrency: "INR", availability: p.inStock ? "https://schema.org/InStock" : "https://schema.org/OutOfStock", itemOffered: { "@type": "Product", name: p.name, url: abs(`p/${p.key}/`) } }))
+      makesOffer: list.slice(0, 50).map((p) => ({ "@type": "Offer", price: rupeesPlain(p.price), priceCurrency: "INR", availability: p.inStock ? "https://schema.org/InStock" : "https://schema.org/OutOfStock", itemOffered: { "@type": "Product", name: p.name, url: abs(`p/${p.key}/`), offers: { "@type": "Offer", price: rupeesPlain(p.price), priceCurrency: "INR", availability: p.inStock ? "https://schema.org/InStock" : "https://schema.org/OutOfStock", url: abs(`p/${p.key}/`) } } }))
     };
     const crumbs = { "@context": "https://schema.org", "@type": "BreadcrumbList", itemListElement: [{ "@type": "ListItem", position: 1, name: "Home", item: SITE }, { "@type": "ListItem", position: 2, name: "All shops", item: abs("shops/") }, { "@type": "ListItem", position: 3, name: shop.name, item: url }] };
     const contact = [
